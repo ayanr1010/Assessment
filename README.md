@@ -38,10 +38,10 @@ Click the Restart button after losing to play again.
 * Dynamic obstacles that move across the screen
 * Full-screen responsive layout for a better gaming experience
 
-## Challenges Faced 
+## 4. Challenges Faced 
 Challenges I occured throughout this project consisted of many issues with the camera detection. For example the camera not detecting movement and the troubleshooting for this issue was sometimes causing even more issues. Another challenge that I kept facing was multiple runtime errors that I was getting whilst trying to run the code which was happening due to my camera not being able to load fast enough causing the game to crash, I fixed this issue by making it to where the camera wouldnt pop up until it was fully loaded so that the game would not crash anymore. 
 
-## Improvements I would make 
+## 5. Improvements I would make 
 If given more time I would improve on the game design, such as adding a proper chracter and improving on the obstacles designs. Ways that I could improve on them would be by changing the obstacles from blocks to spikes and possibly adding more unique obstacles to the game to enhance the user's experience, I would also add a customization for the character's design so that the user can constantly change how their character looks. Lastly to make the user be engaged to the game I could add multiple levels with different obstacles, thus making each level unique and progressively getting harder to keep the user engaged. 
 
 
