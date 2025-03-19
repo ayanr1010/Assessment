@@ -4,127 +4,164 @@ import * as handTrack from "handtrackjs";
 const App = () => {
   const [playerY, setPlayerY] = useState(150);
   const [isJumping, setIsJumping] = useState(false);
-  const [obstacles, setObstacles] = useState([{ x: 400 }]);
+  const [obstacles, setObstacles] = useState([{ x: 600 }]);
   const [score, setScore] = useState(0);
   const [isGameOver, setIsGameOver] = useState(false);
 
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const modelRef = useRef(null);
+  const streamRef = useRef(null);
+  const jumpRef = useRef(false);
+  const lastSpikeTime = useRef(Date.now());
+  const spikeInterval = useRef(2000); // Default 2 sec gap between spikes
 
+  // Handle Jump
   const handleJump = () => {
-    if (!isJumping) {
+    if (!jumpRef.current) {
+      jumpRef.current = true;
       setIsJumping(true);
-      let jumpHeight = 100;
+      let startY = 150;
+      let peakY = 50;
       let jumpSpeed = 5;
-      let downSpeed = 3;
+      let jumpDirection = -1; // Up
 
-      let upInterval = setInterval(() => {
-        setPlayerY((prev) => {
-          if (prev > 150 - jumpHeight) {
-            return prev - jumpSpeed;
-          } else {
-            clearInterval(upInterval);
-
-            let downInterval = setInterval(() => {
-              setPlayerY((prev) => {
-                if (prev < 150) {
-                  return prev + downSpeed;
-                } else {
-                  clearInterval(downInterval);
-                  setIsJumping(false);
-                  return 150;
-                }
-              });
-            }, 20);
+      const jumpAnimation = () => {
+        setPlayerY((prevY) => {
+          if (jumpDirection === -1 && prevY <= peakY) {
+            jumpDirection = 1; // Start going down
           }
-          return prev;
+          if (jumpDirection === 1 && prevY >= startY) {
+            jumpRef.current = false;
+            setIsJumping(false);
+            return startY;
+          }
+          return prevY + jumpSpeed * jumpDirection;
         });
-      }, 20);
+
+        if (jumpRef.current) {
+          requestAnimationFrame(jumpAnimation);
+        }
+      };
+
+      requestAnimationFrame(jumpAnimation);
     }
   };
 
+  // Restart Game
   const restartGame = () => {
     setPlayerY(150);
-    setObstacles([{ x: 400 }]);
+    setObstacles([{ x: 600 }]);
     setScore(0);
     setIsGameOver(false);
   };
 
+  // Load Model and Video
   useEffect(() => {
-    const loadModel = async () => {
+    let isMounted = true;
+
+    const loadModelAndCamera = async () => {
+      if (modelRef.current) return;
+
       const modelParams = {
         flipHorizontal: true,
         maxNumBoxes: 1,
-        scoreThreshold: 0.5
+        scoreThreshold: 0.5, // Sensitivity
       };
 
       const model = await handTrack.load(modelParams);
-      console.log("✅ HandTrack.js model loaded successfully!");
+      console.log("✅ HandTrack.js model loaded!");
       modelRef.current = model;
 
-      const videoElement = videoRef.current;
-
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480 }
-        });
+        if (!streamRef.current) {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 320, height: 240 },
+          });
 
-        videoElement.srcObject = stream;
-
-        // Ensure `.play()` only runs after the video has loaded
-        videoElement.addEventListener("loadeddata", () => {
-          console.log("📷 Camera loaded successfully!");
-          videoElement.play();
-          setTimeout(() => detectHands(), 100); // Fix for the timing error
-        });
-
+          if (isMounted) {
+            videoRef.current.srcObject = stream;
+            streamRef.current = stream;
+            videoRef.current.addEventListener("loadeddata", () => {
+              console.log("📷 Camera loaded successfully!");
+              detectHands(); // Start detecting
+            });
+          }
+        }
       } catch (error) {
         console.error("❌ Error accessing camera:", error);
       }
     };
 
     const detectHands = async () => {
-      if (modelRef.current) {
-        modelRef.current.detect(videoRef.current).then((predictions) => {
-          console.log("🖐 Hand Predictions:", JSON.stringify(predictions, null, 2));
-
-          if (predictions.length > 0 && !isJumping) {
-            handleJump();
-          }
-          requestAnimationFrame(detectHands);
-        });
+      if (!modelRef.current || !videoRef.current || videoRef.current.readyState !== 4) {
+        requestAnimationFrame(detectHands);
+        return;
       }
+
+      modelRef.current.detect(videoRef.current).then((predictions) => {
+        renderPredictions(predictions);
+        if (predictions.length > 0 && !isJumping) {
+          handleJump();
+        }
+        requestAnimationFrame(detectHands);
+      });
     };
 
-    loadModel();
+    const renderPredictions = (predictions) => {
+      const ctx = canvasRef.current.getContext("2d");
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+
+      predictions.forEach((prediction) => {
+        const { bbox } = prediction;
+        const [x, y, width, height] = bbox;
+
+        ctx.strokeStyle = "#FF0000";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, width, height);
+
+        ctx.fillStyle = "#FF0000";
+        ctx.font = "14px Arial";
+        ctx.fillText("Hand", x, y - 5);
+      });
+    };
+
+    loadModelAndCamera();
 
     return () => {
-      if (videoRef.current) {
-        const tracks = videoRef.current.srcObject?.getTracks();
-        tracks?.forEach((track) => track.stop());
+      isMounted = false;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
     };
-  }, [isJumping]);
+  }, []);
 
+  // Game Loop (Fixed for No Slowdown + Spacing)
   useEffect(() => {
     let gameLoop = setInterval(() => {
       if (!isGameOver) {
         setObstacles((prev) =>
-          prev.map((obs) => {
-            if (obs.x < 40 && obs.x > 30 && playerY <= 150) {
-              setIsGameOver(true);  // Death screen
-            }
-
-            if (obs.x < 40 && playerY > 150) {
-              setScore((prevScore) => prevScore + 5); // Score count
-            }
-
-            return { x: obs.x - 5 };
-          }).filter((obs) => obs.x > -20)
+          prev
+            .map((obs) => {
+              if (obs.x < 40 && obs.x > 30 && playerY >= 150) {
+                setIsGameOver(true);
+              }
+              if (obs.x < 40 && playerY < 150) {
+                setScore((prevScore) => prevScore + 5);
+              }
+              return { x: obs.x - 5 }; // Move spikes smoothly
+            })
+            .filter((obs) => obs.x > -20)
         );
 
-        if (Math.random() < 0.02) {
-          setObstacles((prev) => [...prev, { x: 400 }]);
+        // Add new spike with randomized delay
+        const currentTime = Date.now();
+        if (currentTime - lastSpikeTime.current > spikeInterval.current) {
+          const randomGap = Math.floor(Math.random() * 1500) + 2000; // Random 2s to 3.5s gap
+          spikeInterval.current = randomGap;
+          setObstacles((prev) => [...prev, { x: 600 }]);
+          lastSpikeTime.current = currentTime;
         }
       }
     }, 30);
@@ -138,12 +175,9 @@ const App = () => {
         textAlign: "center",
         height: "100vh",
         width: "100vw",
-        border: "2px solid black",
         position: "relative",
         overflow: "hidden",
-        backgroundColor: "#87CEEB", // Background color (light blue) 
-        display: "flex",
-        justifyContent: "space-between",
+        backgroundColor: "#87CEEB",
       }}
     >
       {isGameOver && (
@@ -178,14 +212,47 @@ const App = () => {
         </div>
       )}
 
+      {/* Game Canvas and Player */}
       <div
         style={{
           position: "relative",
-          width: "75%",
+          width: "100%",
           height: "100%",
-          borderRight: "2px solid black"
+          overflow: "hidden",
         }}
       >
+        {/* Video Feed */}
+        <video
+          ref={videoRef}
+          width="320"
+          height="240"
+          style={{
+            position: "absolute",
+            top: "10px",
+            left: "10px",
+            zIndex: 2,
+            opacity: 0.7,
+            border: "2px solid black",
+          }}
+          autoPlay
+          muted
+          playsInline
+        />
+
+        {/* Canvas for Bounding Box */}
+        <canvas
+          ref={canvasRef}
+          width="320"
+          height="240"
+          style={{
+            position: "absolute",
+            top: "10px",
+            left: "10px",
+            zIndex: 3,
+          }}
+        />
+
+        {/* Player (Blue Block) */}
         <div
           style={{
             position: "absolute",
@@ -194,9 +261,11 @@ const App = () => {
             width: "20px",
             height: "20px",
             backgroundColor: "blue",
+            zIndex: 4,
           }}
         ></div>
 
+        {/* Obstacles (Spikes) */}
         {obstacles.map((obs, index) => (
           <div
             key={index}
@@ -204,12 +273,28 @@ const App = () => {
               position: "absolute",
               bottom: "150px",
               left: `${obs.x}px`,
-              width: "20px",
-              height: "20px",
-              backgroundColor: "red",
+              width: "0",
+              height: "0",
+              borderLeft: "10px solid transparent",
+              borderRight: "10px solid transparent",
+              borderBottom: "20px solid red",
+              zIndex: 4,
             }}
           ></div>
         ))}
+
+        {/* Ground Line */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: "150px",
+            left: "0",
+            width: "100%",
+            height: "3px",
+            backgroundColor: "#4B4B4B",
+            zIndex: 4,
+          }}
+        ></div>
 
         {/* Score Counter */}
         <div
@@ -221,25 +306,11 @@ const App = () => {
             color: "white",
             padding: "5px 10px",
             borderRadius: "5px",
+            zIndex: 5,
           }}
         >
           Score: {score}
         </div>
-      </div>
-
-      <div style={{ width: "25%", height: "100%" }}>
-        <video
-          ref={videoRef}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover"
-          }}
-          autoPlay
-          muted
-          playsInline
-          id="videoElement"
-        />
       </div>
     </div>
   );
